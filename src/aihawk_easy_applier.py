@@ -5,7 +5,7 @@ import random
 import re
 import time
 import traceback
-from typing import List, Optional, Any, Tuple
+from typing import List, Optional, Any, Tuple, Dict
 
 from httpx import HTTPStatusError
 from reportlab.lib.pagesizes import A4
@@ -36,6 +36,7 @@ class AIHawkEasyApplier:
         self.resume_generator_manager = resume_generator_manager
         self.all_data = self._load_questions_from_json()
         self.current_job = None
+        self.batch_answers = {}
 
         logger.debug("AIHawkEasyApplier initialized successfully")
 
@@ -333,6 +334,7 @@ class AIHawkEasyApplier:
 
     def fill_up(self, job) -> None:
         logger.debug(f"Filling up form sections for job: {job}")
+        self.batch_answers = {}
 
         try:
             easy_apply_content = WebDriverWait(self.driver, 10).until(
@@ -457,7 +459,16 @@ class AIHawkEasyApplier:
                 logger.debug(f"Generated file path for resume: {file_path_pdf}")
 
                 logger.debug(f"Generating resume for job: {job.title} at {job.company}")
-                resume_pdf_base64 = self.resume_generator_manager.pdf_base64(job_description_text=job.description)
+                
+                # Optimized: Use the batched artifact generation to get all tailored sections in one call
+                # This stays within 15 RPM Gemini limit by avoiding 7+ individual section calls
+                artifacts = self.gpt_answerer.generate_application_artifacts(job.description, self.gpt_answerer.resume_yaml or "")
+                resume_sections = artifacts.get('resume_sections')
+                
+                resume_pdf_base64 = self.resume_generator_manager.pdf_base64(
+                    job_description_text=job.description,
+                    precomputed_sections=resume_sections
+                )
                 with open(file_path_pdf, "xb") as f:
                     f.write(base64.b64decode(resume_pdf_base64))
                 logger.debug(f"Resume successfully generated and saved to: {file_path_pdf}")
@@ -619,9 +630,52 @@ class AIHawkEasyApplier:
             logger.error(f"Cover letter upload failed: {tb_str}")
             raise Exception(f"Upload failed: \nTraceback:\n{tb_str}")
 
+    def _extract_section_info(self, section: WebElement) -> Optional[Dict[str, Any]]:
+        try:
+            radios = section.find_elements(By.CLASS_NAME, 'fb-text-selectable__option')
+            if radios:
+                question_text = section.text.split('\n')[0].lower().strip()
+                options = [radio.text.lower().strip() for radio in radios]
+                return {"id": question_text, "text": question_text, "type": "radio", "options": options}
+
+            dropdowns = section.find_elements(By.TAG_NAME, 'select')
+            if dropdowns:
+                dropdown = dropdowns[0]
+                select = Select(dropdown)
+                options = [option.text.strip() for option in select.options if option.text.strip()]
+                label_elements = section.find_elements(By.TAG_NAME, 'label')
+                question_text = label_elements[0].text.lower().strip() if label_elements else "unknown"
+                return {"id": question_text, "text": question_text, "type": "dropdown", "options": options}
+
+            text_fields = section.find_elements(By.TAG_NAME, 'input') + section.find_elements(By.TAG_NAME, 'textarea')
+            if text_fields:
+                text_field = text_fields[0]
+                if text_field.get_attribute('type') == 'hidden':
+                    return None
+                label_elements = section.find_elements(By.TAG_NAME, 'label')
+                question_text = label_elements[0].text.lower().strip() if label_elements else "unknown"
+                is_numeric = self._is_numeric_field(text_field)
+                return {"id": question_text, "text": question_text, "type": "numeric" if is_numeric else "textbox", "options": []}
+            return None
+        except Exception:
+            return None
+
     def _fill_additional_questions(self) -> None:
         logger.debug("Filling additional questions")
         form_sections = self.driver.find_elements(By.CLASS_NAME, 'jobs-easy-apply-form-section__grouping')
+        
+        questions_to_batch = []
+        for section in form_sections:
+            info = self._extract_section_info(section)
+            if info:
+                is_answered = any(self._sanitize_text(info['text']) == self._sanitize_text(item['question']) for item in self.all_data)
+                if not is_answered:
+                    questions_to_batch.append(info)
+        
+        if questions_to_batch:
+            batch_results = self.gpt_answerer.answer_questions_batch(questions_to_batch)
+            self.batch_answers.update(batch_results)
+
         for section in form_sections:
             self._process_form_section(section)
 
@@ -663,12 +717,15 @@ class AIHawkEasyApplier:
             existing_answer = None
             for item in self.all_data:
                 if self._sanitize_text(question_text) in item['question'] and item['type'] == 'radio':
-                    existing_answer = item
-
+                    existing_answer = item['answer']
                     break
+            
+            if not existing_answer:
+                existing_answer = self.batch_answers.get(question_text.split('\n')[0].lower().strip())
+
             if existing_answer:
-                self._select_radio(radios, existing_answer['answer'])
-                logger.debug("Selected existing radio answer")
+                self._select_radio(radios, existing_answer)
+                logger.debug(f"Selected existing/batch radio answer: {existing_answer}")
                 return True
 
             answer = self.gpt_answerer.answer_question_from_options(question_text, options)
@@ -701,19 +758,20 @@ class AIHawkEasyApplier:
                 for item in self.all_data:
                     if self._sanitize_text(item['question']) == self._sanitize_text(question_text) and item.get('type') == question_type:
                         existing_answer = item['answer']
-                        logger.debug(f"Found existing answer: {existing_answer}")
                         break
+                
+                # Batch answer check
+                if not existing_answer:
+                    existing_answer = self.batch_answers.get(question_text)
 
             if existing_answer and not is_cover_letter:
                 answer = existing_answer
-                logger.debug(f"Using existing answer: {answer}")
+                logger.debug(f"Using existing/batch answer: {answer}")
             else:
                 if is_numeric:
                     answer = self.gpt_answerer.answer_question_numeric(question_text)
-                    logger.debug(f"Generated numeric answer: {answer}")
                 else:
                     answer = self.gpt_answerer.answer_question_textual_wide_range(question_text)
-                    logger.debug(f"Generated textual answer: {answer}")
 
             self._enter_text(text_field, answer)
             logger.debug("Entered answer into the textbox.")
@@ -783,15 +841,17 @@ class AIHawkEasyApplier:
                     if self._sanitize_text(question_text) in item['question'] and item['type'] == 'dropdown':
                         existing_answer = item['answer']
                         break
+                
+                if not existing_answer:
+                    existing_answer = self.batch_answers.get(question_text)
 
                 if existing_answer:
-                    logger.debug(f"Found existing answer for question '{question_text}': {existing_answer}")
+                    logger.debug(f"Found existing/batch answer for question '{question_text}': {existing_answer}")
                     if current_selection != existing_answer:
-                        logger.debug(f"Updating selection to: {existing_answer}")
                         self._select_dropdown_option(dropdown, existing_answer)
                     return True
 
-                logger.debug(f"No existing answer found, querying model for: {question_text}")
+                logger.debug(f"No existing/batch answer found, querying model for: {question_text}")
 
                 answer = self.gpt_answerer.answer_question_from_options(question_text, options)
                 self._save_questions_to_json({'type': 'dropdown', 'question': question_text, 'answer': answer})

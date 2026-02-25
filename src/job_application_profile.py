@@ -64,6 +64,7 @@ class JobApplicationProfile:
     salary_expectations: SalaryExpectations
 
     def __init__(self, yaml_str: str):
+        self.yaml_str = yaml_str
         logger.debug("Initializing JobApplicationProfile with provided YAML string")
         try:
             data = yaml.safe_load(yaml_str)
