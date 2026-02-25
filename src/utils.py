@@ -111,10 +111,12 @@ def scroll_slow(driver, scrollable_element, start=0, end=3600, step=300, reverse
         logger.error(f"Exception occurred during scrolling: {e}")
 
 
-def chrome_browser_options():
+def chrome_browser_options(headless=False):
     logger.debug("Setting Chrome browser options")
     ensure_chrome_profile()
     options = webdriver.ChromeOptions()
+    if headless:
+        options.add_argument("--headless=new")
     options.add_argument("--start-maximized")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")

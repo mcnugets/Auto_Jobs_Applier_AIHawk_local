@@ -20,6 +20,45 @@ from loguru import logger
 # Suppress stderr only during specific operations
 original_stderr = sys.stderr
 
+import logging
+
+class InterceptHandler(logging.Handler):
+    def emit(self, record):
+        # Get corresponding Loguru level if it exists
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        # Find caller from where originated the logged message
+        frame, depth = logging.currentframe(), 2
+        while frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
+
+        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+
+def setup_logging():
+    # Remove default handler
+    logger.remove()
+    # Add a cleaner terminal handler
+    logger.add(
+        sys.stdout, 
+        format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{message}</cyan>",
+        colorize=True,
+        level="INFO" # Default to INFO for terminal unless debugging
+    )
+    # Intercept standard logging
+    logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
+    
+    # Mute noisy libraries
+    logging.getLogger("telethon").setLevel(logging.WARNING)
+    logging.getLogger("selenium").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("webdriver_manager").setLevel(logging.WARNING)
+
+setup_logging()
+
 class ConfigError(Exception):
     pass
 
@@ -53,7 +92,8 @@ class ConfigValidator:
             'company_blacklist': list,
             'title_blacklist': list,
             'llm_model_type': str,
-            'llm_model': str
+            'llm_model': str,
+            'headless': bool
         }
 
         for key, expected_type in required_keys.items():
@@ -149,53 +189,48 @@ class FileManager:
 
         return result
 
-def init_browser() -> webdriver.Chrome:
+def init_browser(headless: bool = False) -> webdriver.Chrome:
     try:
-        options = chrome_browser_options()
+        options = chrome_browser_options(headless=headless)
         service = ChromeService(ChromeDriverManager().install())
         return webdriver.Chrome(service=service, options=options)
     except Exception as e:
         raise RuntimeError(f"Failed to initialize browser: {str(e)}")
 
-def create_and_run_bot(parameters, llm_api_key):
+def create_and_run_bot(parameters: dict, llm_api_key: str, channel: str):
+    from src.job_application_profile import JobApplicationProfile
+    from src.adapters.linkedin_adapter import LinkedInAdapter
+    from src.adapters.telegram_adapter import TelegramAdapter
+    from src.adapters.career_website_adapter import CareerWebsiteAdapter
+    from loguru import logger
+    
     try:
-        style_manager = StyleManager()
-        resume_generator = ResumeGenerator()
         with open(parameters['uploads']['plainTextResume'], "r", encoding='utf-8') as file:
             plain_text_resume = file.read()
-        resume_object = Resume(plain_text_resume)
-        resume_generator_manager = FacadeManager(llm_api_key, style_manager, resume_generator, resume_object, Path("data_folder/output"))
+            
+        profile = JobApplicationProfile(plain_text_resume)
         
-        # Run the resume generator manager's functions
-        resume_generator_manager.choose_style()
-        
-        job_application_profile_object = JobApplicationProfile(plain_text_resume)
-        
-        browser = init_browser()
-        login_component = AIHawkAuthenticator(browser)
-        apply_component = AIHawkJobManager(browser)
-        gpt_answerer_component = GPTAnswerer(parameters, llm_api_key)
-        bot = AIHawkBotFacade(login_component, apply_component)
-        bot.set_job_application_profile_and_resume(job_application_profile_object, resume_object)
-        bot.set_gpt_answerer_and_resume_generator(gpt_answerer_component, resume_generator_manager)
-        bot.set_parameters(parameters)
-        bot.start_login()
-        if (parameters['collectMode'] == True):
-            print('Collecting')
-            bot.start_collect_data()
+        adapter = None
+        if channel == 'linkedin':
+            adapter = LinkedInAdapter(profile, parameters, llm_api_key)
+        elif channel == 'telegram':
+            adapter = TelegramAdapter(profile, parameters, llm_api_key)
+        elif channel == 'career_website':
+            adapter = CareerWebsiteAdapter(profile, parameters, llm_api_key)
         else:
-            print('Applying')
-            bot.start_apply()
-    except WebDriverException as e:
-        logger.error(f"WebDriver error occurred: {e}")
+            raise ValueError(f"Unknown channel: {channel}")
+            
+        logger.info(f"Running bot for channel: {channel}")
+        adapter.run()
+        
     except Exception as e:
-        raise RuntimeError(f"Error running the bot: {str(e)}")
-
+        raise RuntimeError(f"Error initializing or running bot: {str(e)}")
 
 @click.command()
+@click.option('--channel', type=click.Choice(['telegram', 'linkedin', 'career_website', 'all']), default='linkedin', help="Choose application channel")
 @click.option('--resume', type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path), help="Path to the resume PDF file")
 @click.option('--collect', is_flag=True, help="Only collects data job information into data.json file")
-def main(collect: False, resume: Path = None):
+def main(channel: str, collect: bool, resume: Path = None):
     try:
         data_folder = Path("data_folder")
         secrets_file, config_file, plain_text_resume_file, output_folder = FileManager.validate_data_folder(data_folder)
@@ -206,12 +241,18 @@ def main(collect: False, resume: Path = None):
         parameters['uploads'] = FileManager.file_paths_to_dict(resume, plain_text_resume_file)
         parameters['outputFileDirectory'] = output_folder
         parameters['collectMode'] = collect
+        parameters['channel'] = channel
         
-        create_and_run_bot(parameters, llm_api_key)
+        if channel == 'all':
+            logger.warning("Running all channels sequentially...")
+            for ch in ['linkedin', 'telegram', 'career_website']:
+                create_and_run_bot(parameters, llm_api_key, ch)
+        else:
+            create_and_run_bot(parameters, llm_api_key, channel)
+            
     except ConfigError as ce:
         logger.error(f"Configuration error: {str(ce)}")
         logger.error(f"Refer to the configuration guide for troubleshooting: https://github.com/feder-cr/Auto_Jobs_Applier_AIHawk?tab=readme-ov-file#configuration {str(ce)}")
-
     except FileNotFoundError as fnf:
         logger.error(f"File not found: {str(fnf)}")
         logger.error("Ensure all required files are present in the data folder.")
