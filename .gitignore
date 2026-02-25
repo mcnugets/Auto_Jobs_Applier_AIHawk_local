@@ -162,3 +162,9 @@ mono_crash.*
 
 /generated_cv
 data_folder/secrets.yaml
+*.session
+*.db
+*.pdf
+.agent/
+test_linkedin_easy_apply.py
+send_live_test.py
