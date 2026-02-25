@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
-from typing import Union
+from typing import Union, Any
 
 import httpx
 from Levenshtein import distance
@@ -70,25 +70,51 @@ class OllamaModel(AIModel):
 
 #gemini doesn't seem to work because API doesn't rstitute answers for questions that involve answers that are too short
 class GeminiModel(AIModel):
-    def __init__(self, api_key:str, llm_model: str):
+    def __init__(self, api_key: str, llm_model: str):
+        self.api_key = api_key
+        # Parse potential list of models
+        if isinstance(llm_model, str) and ',' in llm_model:
+            self.model_list = [m.strip() for m in llm_model.split(',')]
+        elif isinstance(llm_model, list):
+            self.model_list = llm_model
+        else:
+            self.model_list = [llm_model]
+        
+        self.current_model_index = 0
+        self._init_model()
+
+    def _init_model(self):
         from langchain_google_genai import ChatGoogleGenerativeAI, HarmBlockThreshold, HarmCategory
-        self.model = ChatGoogleGenerativeAI(model=llm_model, google_api_key=api_key,safety_settings={
-        HarmCategory.HARM_CATEGORY_UNSPECIFIED: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_DEROGATORY: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_TOXICITY: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_VIOLENCE: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_SEXUAL: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_MEDICAL: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_DANGEROUS: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE
+        model_name = self.model_list[self.current_model_index]
+        logger.debug(f"Initializing Gemini with model: {model_name}")
+        self.model = ChatGoogleGenerativeAI(model=model_name, google_api_key=self.api_key, safety_settings={
+            HarmCategory.HARM_CATEGORY_UNSPECIFIED: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DEROGATORY: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_TOXICITY: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_VIOLENCE: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUAL: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_MEDICAL: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE
         })
 
     def invoke(self, prompt: str) -> BaseMessage:
-        response = self.model.invoke(prompt)
-        return response
+        try:
+            return self.model.invoke(prompt)
+        except Exception as e:
+            error_msg = str(e)
+            if "429" in error_msg or "ResourceExhausted" in error_msg:
+                if len(self.model_list) > 1:
+                    old_model = self.model_list[self.current_model_index]
+                    self.current_model_index = (self.current_model_index + 1) % len(self.model_list)
+                    new_model = self.model_list[self.current_model_index]
+                    logger.warning(f"Quota reached for Gemini ({old_model}). Switching to next model: {new_model}")
+                    self._init_model()
+                    return self.invoke(prompt) # Recursive retry with next model
+            raise e
 
 class HuggingFaceModel(AIModel):
     def __init__(self, api_key: str, llm_model: str):
@@ -156,28 +182,31 @@ class LLMLogger:
             logger.debug("Prompts are of type StringPromptValue")
             prompts = prompts.text
             logger.debug(f"Prompts converted to text: {prompts}")
-        elif isinstance(prompts, Dict):
-            logger.debug("Prompts are of type Dict")
+        elif isinstance(prompts, list):
+            logger.debug("Prompts are of type list")
             try:
                 prompts = {
-                    f"prompt_{i + 1}": prompt.content
+                    f"prompt_{i + 1}": prompt.content if hasattr(prompt, 'content') else str(prompt)
+                    for i, prompt in enumerate(prompts)
+                }
+                logger.debug(f"Prompts converted to dictionary: {prompts}")
+            except Exception as e:
+                logger.error(f"Error converting prompts list to dictionary: {str(e)}")
+                raise
+        elif hasattr(prompts, 'messages'):
+            logger.debug("Prompts have 'messages' attribute")
+            try:
+                prompts = {
+                    f"prompt_{i + 1}": prompt.content if hasattr(prompt, 'content') else str(prompt)
                     for i, prompt in enumerate(prompts.messages)
                 }
                 logger.debug(f"Prompts converted to dictionary: {prompts}")
             except Exception as e:
-                logger.error(f"Error converting prompts to dictionary: {str(e)}")
+                logger.error(f"Error converting prompts.messages to dictionary: {str(e)}")
                 raise
         else:
-            logger.debug("Prompts are of unknown type, attempting default conversion")
-            try:
-                prompts = {
-                    f"prompt_{i + 1}": prompt.content
-                    for i, prompt in enumerate(prompts.messages)
-                }
-                logger.debug(f"Prompts converted to dictionary using default method: {prompts}")
-            except Exception as e:
-                logger.error(f"Error converting prompts using default method: {str(e)}")
-                raise
+            logger.debug("Prompts are of unknown type, attempting fallback string conversion")
+            prompts = {"prompt_1": str(prompts)}
 
         try:
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -247,22 +276,43 @@ class LoggerChatModel:
         logger.debug(f"LoggerChatModel successfully initialized with LLM: {llm}")
 
     def __call__(self, messages: List[Dict[str, str]]) -> str:
-        logger.debug(f"Entering __call__ method with messages: {messages}")
+        return self.invoke(messages)
+
+    def invoke(self, input_data: Union[str, List[Dict[str, str]], Any]) -> AIMessage:
+        logger.debug(f"Entering invoke method with input: {input_data}")
+        
+        # Convert input to a format the adapter expects (adapter.invoke expects a string or list)
+        # But adapter calls model.invoke, which for Langchain models handles ChatPromptValue, list of messages, etc.
+        
         while True:
             try:
-                logger.debug("Attempting to call the LLM with messages")
+                logger.debug("Attempting to call the LLM")
+
+                # Handle Langchain ChatPromptValue or individual strings
+                if hasattr(input_data, 'to_messages'):
+                    messages = input_data.to_messages()
+                else:
+                    messages = input_data
 
                 reply = self.llm.invoke(messages)
                 logger.debug(f"LLM response received: {reply}")
 
-                parsed_reply = self.parse_llmresult(reply)
+                # If the reply is an AIMessage, we must return it for LCEL chains to work with StrOutputParser
+                # If it's a string, we wrap it
+                if isinstance(reply, str):
+                    logger.warning("LLM returned string instead of AIMessage in LoggerChatModel. Wrapping.")
+                    reply_message = AIMessage(content=reply)
+                else:
+                    reply_message = reply
+
+                parsed_reply = self.parse_llmresult(reply_message)
                 logger.debug(f"Parsed LLM reply: {parsed_reply}")
 
                 LLMLogger.log_request(
                     prompts=messages, parsed_reply=parsed_reply)
                 logger.debug("Request successfully logged")
 
-                return reply
+                return reply_message
 
             except httpx.HTTPStatusError as e:
                 logger.error(f"HTTPStatusError encountered: {str(e)}")
@@ -357,12 +407,23 @@ class LoggerChatModel:
 class GPTAnswerer:
 
     def __init__(self, config, llm_api_key):
+        self.config = config
         self.ai_adapter = AIAdapter(config, llm_api_key)
         self.llm_cheap = LoggerChatModel(self.ai_adapter)
+        self.cached_artifacts = {}
+        self.resume = None
+        self.job = None
+        self._job_description = ""
 
     @property
     def job_description(self):
-        return self.job.description
+        if self.job and getattr(self.job, 'description', None):
+            return self.job.description
+        return self._job_description or ""
+
+    @job_description.setter
+    def job_description(self, value):
+        self._job_description = value
 
     @staticmethod
     def find_best_match(text: str, options: list[str]) -> str:
@@ -392,6 +453,8 @@ class GPTAnswerer:
     def set_job(self, job):
         logger.debug(f"Setting job: {job}")
         self.job = job
+        self.job_description = getattr(job, 'description', "")
+        self.cached_artifacts = {} # Clear tailoring artifacts
         self.job.set_summarize_job_description(
             self.summarize_job_description(self.job.description))
 
@@ -418,6 +481,9 @@ class GPTAnswerer:
 
     def answer_question_textual_wide_range(self, question: str) -> str:
         logger.debug(f"Answering textual question: {question}")
+        # Overridable templates
+        coverletter_tpl = self.config.get('cover_letter_prompt', strings.coverletter_template)
+
         chains = {
             "personal_information": self._create_chain(strings.personal_information_template),
             "self_identification": self._create_chain(strings.self_identification_template),
@@ -431,8 +497,11 @@ class GPTAnswerer:
             "certifications": self._create_chain(strings.certifications_template),
             "languages": self._create_chain(strings.languages_template),
             "interests": self._create_chain(strings.interests_template),
-            "cover_letter": self._create_chain(strings.coverletter_template),
+            "cover_letter": self._create_chain(coverletter_tpl),
         }
+
+        # logger.debug(f"Chains initialized for sections: {list(chains.keys())}")
+
         section_prompt = """You are assisting a bot designed to automatically apply for jobs on AIHawk. The bot receives various questions about job applications and needs to determine the most relevant section of the resume to provide an accurate response.
 
         For the following question: '{question}', determine which section of the resume is most relevant. 
@@ -518,6 +587,11 @@ class GPTAnswerer:
             - **Use When**: The question involves your cover letter or specific written content intended for the job application.
             - **Examples**: Cover letter content, personalized statements.
 
+        14. **Telegram message**:
+            - **Purpose**: A short, professional message to a recruiter or hiring manager.
+            - **Use When**: The question asks to write a message, reach out to contact, or introduce yourself for a role.
+            - **Examples**: Greeting recruiter, message to contact person.
+
         Provide only the exact name of the section from the list above with no additional text.
         """
         prompt = ChatPromptTemplate.from_template(section_prompt)
@@ -527,7 +601,7 @@ class GPTAnswerer:
         match = re.search(
             r"(Personal information|Self Identification|Legal Authorization|Work Preferences|Education "
             r"Details|Experience Details|Projects|Availability|Salary "
-            r"Expectations|Certifications|Languages|Interests|Cover letter)",
+            r"Expectations|Certifications|Languages|Interests|Cover letter|Telegram message)",
             output, re.IGNORECASE)
         if not match:
             raise ValueError(
@@ -535,11 +609,34 @@ class GPTAnswerer:
 
         section_name = match.group(1).lower().replace(" ", "_")
 
-        if section_name == "cover_letter":
+        if section_name in ["cover_letter", "telegram_message"]:
+            # Check cache first for batched artifacts
+            if section_name in self.cached_artifacts:
+                logger.debug(f"Using cached {section_name} from batched generation")
+                return self.cached_artifacts[section_name]
+                
+            # If not cached, trigger batched generation
+            if self.config.get('smart_master_prompt'):
+                resume_yaml = getattr(self.resume, 'yaml_str', None)
+                if not resume_yaml and hasattr(self, 'job_application_profile'):
+                    resume_yaml = getattr(self.job_application_profile, 'yaml_str', None)
+                
+                if resume_yaml:
+                    self.generate_application_artifacts(self.job_description, resume_yaml)
+                
+                if section_name in self.cached_artifacts:
+                    return self.cached_artifacts[section_name]
+
+            if section_name == "telegram_message":
+                # Fallback for telegram_message if smart prompt failed
+                return "Hello! I'm interested in this position. Please find my CV attached."
+
+            # Legacy fallback for cover_letter
             chain = chains.get(section_name)
-            output = chain.invoke(
-                {"resume": self.resume, "job_description": self.job_description})
-            logger.debug(f"Cover letter generated: {output}")
+            if not self.resume:
+                logger.warning("No resume set on GPTAnswerer, returning empty string for section.")
+                return ""
+            output = chain.invoke({"resume": self.resume, "job_description": self.job_description})
             return output
         resume_section = getattr(self.resume, section_name, None) or getattr(self.job_application_profile, section_name,
                                                                              None)
@@ -611,7 +708,7 @@ class GPTAnswerer:
                 """
         prompt = ChatPromptTemplate.from_template(prompt_template)
         chain = prompt | self.llm_cheap | StrOutputParser()
-        response = chain.invoke({"phrase": phrase})
+        response = chain.invoke({"phrase": phrase}).lower()
         logger.debug(f"Response for resume_or_cover: {response}")
         if "resume" in response:
             return "resume"
@@ -619,3 +716,155 @@ class GPTAnswerer:
             return "cover"
         else:
             return "resume"
+
+    SMART_MASTER_PROMPT_TEMPLATE = """
+You are an expert career coach and recruiter. Analyze the provided resume and job description to generate professional application artifacts.
+
+# Candidate Profile (Resume YAML):
+{{ resume_yaml }}
+
+# Job Description:
+{{ job_description }}
+
+# Output Requirements (JSON):
+Generate a JSON object with the following keys:
+1. "telegram_message": A very concise, professional message (50-70 words).
+   - IMPORTANT: Use the SAME language as the 'Job Description' provided.
+   - Use 2-3 short, distinct paragraphs (use \n for line breaks). NO walls of text.
+   - Strictly NO markdown (no **, no _, no `).
+   - End with a professional sign-off (e.g., "Best regards, Sultangazy Yergaliyev" in the appropriate language).
+2. "cover_letter": A concise 3-paragraph tailored cover letter.
+   - IMPORTANT: Use the SAME language as the 'Job Description' provided.
+   - Must end with a professional sign-off (e.g., "Sincerely, Sultangazy Yergaliyev" in the appropriate language).
+3. "resume_sections": An object containing tailored HTML snippets for each section.
+   - IMPORTANT: MUST BE IN ENGLISH REGARDLESS OF THE JOB DESCRIPTION LANGUAGE.
+   - Keep the HTML structure clean (use <h3>, <ul>, <li>, <p>). Each snippet should be 1-2 paragraphs or a bullet list.
+   - "header": Use the candidate's name and contact info. Create a 2-sentence professional summary tailored to the job.
+   - "education": Format education details highlighting relevant courses. IMPORTANT: DO NOT include years or dates.
+   - "work_experience": Tailor bullet points to emphasize skills requested in the job description.
+   - "side_projects": Highlight projects relevant to the tech stack of the job.
+   - "achievements": Select and rephrase achievements that show impact related to the role.
+   - "certifications": Relevant certifications.
+   - "additional_skills": A categorized list of tech and soft skills matching the job.
+4. "resume_markdown": "A complete, high-quality Markdown version of the tailored resume. Use professional formatting. Include all contact info and experiences. This is for direct PDF conversion. IMPORTANT: MUST BE IN ENGLISH AND DO NOT include years or dates in the Education section."
+
+Return ONLY valid JSON.
+"""
+
+    BATCH_QUESTIONS_PROMPT_TEMPLATE = """
+You are an expert at filling job applications. Use the provided resume to answer a batch of questions from a job application form.
+
+# Candidate Profile (Resume YAML):
+{{ resume_yaml }}
+
+# Questions to Answer:
+{{ questions_json }}
+
+# Instructions:
+1. For each question, provide the most accurate answer based on the resume.
+2. If not explicitly found, make a professional inference.
+3. Numeric questions: provide ONLY the number.
+4. Dropdown/Radio questions: Select the EXACT text from the provided options.
+5. Textbox questions: Provide a concise, professional response (max 20 words).
+
+# Output Requirements (JSON):
+Return a JSON object where keys are question "id" and values are the "answer".
+Return ONLY valid JSON.
+"""
+
+    def generate_application_artifacts(self, job_description: str, resume_yaml: str) -> dict:
+        if self.cached_artifacts:
+            logger.debug("Returning cached application artifacts")
+            return self.cached_artifacts
+
+        logger.info("🤖 AI is analyzing the job and generating your application artifacts (batched call)...")
+        self.job_description = job_description # Store for other methods (fallbacks)
+        config_template = self.config.get('smart_master_prompt', "")
+        
+        # If it's a boolean True or empty, use the default template
+        if config_template is True or (isinstance(config_template, str) and (config_template.lower() == "true" or not config_template)):
+            master_template = self.SMART_MASTER_PROMPT_TEMPLATE
+        elif isinstance(config_template, str):
+            master_template = config_template
+        else:
+            logger.warning("Invalid smart_master_prompt format. Using default template.")
+            master_template = self.SMART_MASTER_PROMPT_TEMPLATE
+
+        if not master_template:
+            logger.warning("No master template available. Returning empty artifacts.")
+            return {}
+
+        # Render template
+        try:
+            from jinja2 import Template
+            jinja_template = Template(master_template)
+            prompt_text = jinja_template.render(
+                resume_yaml=resume_yaml or "",
+                job_description=job_description or ""
+            )
+        except Exception as e:
+            logger.error(f"Error rendering master prompt template: {e}")
+            # Simple fallback replacement if jinja2 fails
+            r_yaml = resume_yaml or ""
+            j_desc = job_description or ""
+            prompt_text = master_template.replace("{{ resume_yaml }}", r_yaml).replace("{{ job_description }}", j_desc)
+
+        try:
+            # Reuse the existing chain logic for consistency with logging
+            prompt = ChatPromptTemplate.from_template("{content}")
+            chain = prompt | self.llm_cheap | StrOutputParser()
+            output = chain.invoke({"content": prompt_text})
+            
+            # Parse JSON
+            # Handle potential markdown code blocks in LLM response
+            clean_output = output.strip()
+            if clean_output.startswith("```json"):
+                clean_output = clean_output[7:].rsplit("```", 1)[0].strip()
+            elif clean_output.startswith("```"):
+                clean_output = clean_output[3:].rsplit("```", 1)[0].strip()
+            
+            import json
+            artifacts = json.loads(clean_output)
+            self.cached_artifacts = artifacts
+            logger.info("Successfully generated and parsed application artifacts batch.");
+            return artifacts
+        except Exception as e:
+            logger.error(f"Error generating or parsing LLM artifacts JSON: {e}");
+            return {}
+
+    def answer_questions_batch(self, questions: List[Dict[str, Any]]) -> Dict[str, str]:
+        """
+        Answers a batch of questions in a single LLM call.
+        'questions' is a list of dicts: {'id': str, 'text': str, 'type': str, 'options': List[str]}
+        """
+        if not questions:
+            return {}
+
+        logger.info(f"🤖 AI is answering a batch of {len(questions)} application questions...")
+        resume_yaml = getattr(self.resume, 'yaml_str', "") or getattr(self.job_application_profile, 'yaml_str', "")
+        
+        from jinja2 import Template
+        template = Template(self.BATCH_QUESTIONS_PROMPT_TEMPLATE)
+        prompt_text = template.render(
+            resume_yaml=resume_yaml,
+            questions_json=json.dumps(questions, indent=2)
+        )
+
+        try:
+            prompt = ChatPromptTemplate.from_template("{content}")
+            chain = prompt | self.llm_cheap | StrOutputParser()
+            output = chain.invoke({"content": prompt_text})
+            
+            clean_output = output.strip()
+            if clean_output.startswith("```json"):
+                clean_output = clean_output[7:].rsplit("```", 1)[0].strip()
+            elif clean_output.startswith("```"):
+                clean_output = clean_output[3:].rsplit("```", 1)[0].strip()
+            
+            answers = json.loads(clean_output)
+            logger.info(f"Successfully answered {len(answers)} questions in batch.")
+            return answers
+        except Exception as e:
+            logger.error(f"Error in batch question answering: {e}")
+            return {}
+
