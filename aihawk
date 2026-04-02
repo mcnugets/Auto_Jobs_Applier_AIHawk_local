@@ -1,0 +1,37 @@
+#!/bin/bash
+
+# Find the directory where this script is located
+SCRIPT_DIR=$(unset CDPATH && cd "$(dirname "$0")" && pwd)
+
+# Paths
+VENV_PYTHON="${SCRIPT_DIR}/virtual/bin/python"
+VENV_PIP="${SCRIPT_DIR}/virtual/bin/pip"
+REQUIREMENTS_FILE="${SCRIPT_DIR}/requirements.txt"
+FINGERPRINT_FILE="${SCRIPT_DIR}/virtual/.requirements_installed"
+
+# Check if the virtual environment exists
+if [ ! -f "${VENV_PYTHON}" ]; then
+    echo "Error: Virtual environment not found at ${VENV_PYTHON}"
+    echo "Please run 'python3 -m venv virtual' to create it."
+    exit 1
+fi
+
+# Check if requirements are installed and up-to-date
+if [ ! -f "${FINGERPRINT_FILE}" ] || [ "${REQUIREMENTS_FILE}" -nt "${FINGERPRINT_FILE}" ]; then
+    echo "Dependencies are out of date or not installed. Installing..."
+    if "${VENV_PIP}" install -r "${REQUIREMENTS_FILE}"; then
+        echo "Dependencies installed successfully."
+        touch "${FINGERPRINT_FILE}"
+    else
+        echo "Error: Failed to install dependencies from ${REQUIREMENTS_FILE}"
+        exit 1
+    fi
+else
+    echo "Dependencies are up-to-date."
+fi
+
+
+# Execute main.py using the virtual environment's Python interpreter
+# Pass all arguments from the aihawk script to main.py
+echo "Starting AIHawk..."
+exec "${VENV_PYTHON}" "${SCRIPT_DIR}/main.py" "$@"
