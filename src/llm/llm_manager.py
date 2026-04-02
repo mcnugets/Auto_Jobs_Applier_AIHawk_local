@@ -71,7 +71,14 @@ class OllamaModel(AIModel):
 #gemini doesn't seem to work because API doesn't rstitute answers for questions that involve answers that are too short
 class GeminiModel(AIModel):
     def __init__(self, api_key: str, llm_model: str):
-        self.api_key = api_key
+        # Handle multiple API keys for rotation
+        if isinstance(api_key, str) and ',' in api_key:
+            self.api_keys = [k.strip() for k in api_key.split(',')]
+        else:
+            self.api_keys = [api_key]
+        
+        self.current_key_index = 0
+        
         # Parse potential list of models
         if isinstance(llm_model, str) and ',' in llm_model:
             self.model_list = [m.strip() for m in llm_model.split(',')]
@@ -86,8 +93,10 @@ class GeminiModel(AIModel):
     def _init_model(self):
         from langchain_google_genai import ChatGoogleGenerativeAI, HarmBlockThreshold, HarmCategory
         model_name = self.model_list[self.current_model_index]
-        logger.debug(f"Initializing Gemini with model: {model_name}")
-        self.model = ChatGoogleGenerativeAI(model=model_name, google_api_key=self.api_key, safety_settings={
+        api_key = self.api_keys[self.current_key_index]
+        
+        logger.debug(f"Initializing Gemini with model: {model_name} (Key index: {self.current_key_index})")
+        self.model = ChatGoogleGenerativeAI(model=model_name, google_api_key=api_key, safety_settings={
             HarmCategory.HARM_CATEGORY_UNSPECIFIED: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_DEROGATORY: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_TOXICITY: HarmBlockThreshold.BLOCK_NONE,
@@ -106,18 +115,27 @@ class GeminiModel(AIModel):
             return self.model.invoke(prompt)
         except Exception as e:
             error_msg = str(e)
-            # Switch model on quota limit (429) OR model not found (404)
-            if "429" in error_msg or "ResourceExhausted" in error_msg or "404" in error_msg or "not found" in error_msg.lower():
+            
+            # 1. Check for Quota/Auth errors to rotate API KEY
+            if "429" in error_msg or "ResourceExhausted" in error_msg or "401" in error_msg:
+                if len(self.api_keys) > 1 and self.current_key_index < len(self.api_keys) - 1:
+                    self.current_key_index += 1
+                    logger.warning(f"Gemini API Key quota reached or invalid. Rotating to key #{self.current_key_index + 1}")
+                    self._init_model()
+                    return self.invoke(prompt) # Retry with new key
+            
+            # 2. Check for Model errors to rotate MODEL NAME
+            if "404" in error_msg or "not found" in error_msg.lower():
                 if len(self.model_list) > 1 and self.current_model_index < len(self.model_list) - 1:
                     old_model = self.model_list[self.current_model_index]
-                    self.current_model_index = (self.current_model_index + 1) % len(self.model_list)
+                    self.current_model_index += 1
                     new_model = self.model_list[self.current_model_index]
-                    logger.warning(f"Gemini error with {old_model} (Error: {error_msg[:50]}...). Switching to next model: {new_model}")
+                    logger.warning(f"Gemini model {old_model} not found. Switching to next model: {new_model}")
                     self._init_model()
                     return self.invoke(prompt) # Recursive retry with next model
-                else:
-                    logger.critical(f"All Gemini models exhausted or quota exceeded for all configured models. Original error: {error_msg}")
-                    raise RuntimeError(f"Gemini API quota exceeded for all models or models not found. Please check your billing/usage.")
+            
+            # If we reached here, either rotation didn't help or it's a different error
+            logger.critical(f"Gemini error: {error_msg}")
             raise e
 
 class HuggingFaceModel(AIModel):

@@ -218,7 +218,17 @@ class ConfigValidator:
 
         if not secrets['llm_api_key']:
             raise ConfigError(f"llm_api_key cannot be empty in secrets file {secrets_yaml_path}.")
-        return secrets['llm_api_key']
+        
+        # Rotational API keys support: collecting all llm_api_key, llm_api_key_2, llm_api_key_3, etc.
+        api_keys = [str(secrets['llm_api_key'])]
+        i = 2
+        while f'llm_api_key_{i}' in secrets:
+            key = secrets[f'llm_api_key_{i}']
+            if key:
+                api_keys.append(str(key))
+            i += 1
+            
+        return ",".join(api_keys)
 
 class FileManager:
     @staticmethod
