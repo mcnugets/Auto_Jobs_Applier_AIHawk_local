@@ -750,7 +750,8 @@ Generate a JSON object with the following keys:
    - "achievements": Select and rephrase achievements that show impact related to the role.
    - "certifications": Relevant certifications.
    - "additional_skills": A categorized list of tech and soft skills matching the job.
-4. "resume_markdown": "A complete, high-quality Markdown version of the tailored resume. Use professional formatting. Include all contact info and experiences. This is for direct PDF conversion. IMPORTANT: MUST BE IN ENGLISH AND DO NOT include years or dates in the Education section."
+   - IMPORTANT: DO NOT hallucinate. Only include skills, languages, or technologies that are actually present or reasonably inferred from the 'Candidate Profile'. If a required skill from the JD is missing in the resume, DO NOT add it to the tailored output.
+4. "resume_markdown": "A complete, high-quality Markdown version of the tailored resume. Use professional formatting. Include all contact info and experiences. This is for direct PDF conversion. IMPORTANT: MUST BE IN ENGLISH AND DO NOT include years or dates in the Education section. DO NOT add skills that the candidate doesn't have."
 
 Return ONLY valid JSON.
 """
@@ -777,12 +778,16 @@ Return ONLY valid JSON.
 """
 
     def generate_application_artifacts(self, job_description: str, resume_yaml: str) -> dict:
+        # Clear cache if the job description has changed
+        if self._job_description != job_description:
+            self.cached_artifacts = {}
+            self.job_description = job_description
+
         if self.cached_artifacts:
             logger.debug("Returning cached application artifacts")
             return self.cached_artifacts
 
         logger.info("🤖 AI is analyzing the job and generating your application artifacts (batched call)...")
-        self.job_description = job_description # Store for other methods (fallbacks)
         config_template = self.config.get('smart_master_prompt', "")
         
         # If it's a boolean True or empty, use the default template
