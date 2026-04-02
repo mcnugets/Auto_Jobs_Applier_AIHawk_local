@@ -110,7 +110,12 @@ class GeminiModel(AIModel):
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE
         })
 
-    def invoke(self, prompt: str) -> BaseMessage:
+    def invoke(self, prompt: str, attempts: int = 0) -> BaseMessage:
+        # Prevent infinite recursion if all keys fail
+        if attempts >= len(self.api_keys) * 2:
+            logger.critical("All Gemini API keys failed after multiple rotation attempts.")
+            raise RuntimeError("Gemini API quota exceeded for all keys.")
+
         try:
             return self.model.invoke(prompt)
         except Exception as e:
@@ -118,11 +123,14 @@ class GeminiModel(AIModel):
             
             # 1. Check for Quota/Auth errors to rotate API KEY
             if "429" in error_msg or "ResourceExhausted" in error_msg or "401" in error_msg:
-                if len(self.api_keys) > 1 and self.current_key_index < len(self.api_keys) - 1:
-                    self.current_key_index += 1
-                    logger.warning(f"Gemini API Key quota reached or invalid. Rotating to key #{self.current_key_index + 1}")
+                if len(self.api_keys) > 1:
+                    old_key_index = self.current_key_index
+                    self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
+                    logger.warning(f"Gemini API Key #{old_key_index + 1} failed ({error_msg[:50]}...). Rotating to key #{self.current_key_index + 1}")
                     self._init_model()
-                    return self.invoke(prompt) # Retry with new key
+                    # Small sleep to let the rate limit settle if needed
+                    time.sleep(1)
+                    return self.invoke(prompt, attempts + 1)
             
             # 2. Check for Model errors to rotate MODEL NAME
             if "404" in error_msg or "not found" in error_msg.lower():
@@ -132,10 +140,10 @@ class GeminiModel(AIModel):
                     new_model = self.model_list[self.current_model_index]
                     logger.warning(f"Gemini model {old_model} not found. Switching to next model: {new_model}")
                     self._init_model()
-                    return self.invoke(prompt) # Recursive retry with next model
+                    return self.invoke(prompt, attempts) # Note: attempts only count for key rotation
             
             # If we reached here, either rotation didn't help or it's a different error
-            logger.critical(f"Gemini error: {error_msg}")
+            logger.error(f"Gemini execution error: {error_msg}")
             raise e
 
 class HuggingFaceModel(AIModel):
