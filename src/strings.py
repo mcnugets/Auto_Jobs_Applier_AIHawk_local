@@ -249,6 +249,7 @@ Please write the cover letter in a way that directly addresses the job role and 
 - Provide only the text of the cover letter.
 - Do not include any introductions, explanations, or additional information.
 - The letter should be formatted into paragraph.
+- IMPORTANT: Write the cover letter in the SAME language as the job description provided below (e.g., if the job description is in Russian, the cover letter must be in Russian).
 
 ## Job Description:
 ```

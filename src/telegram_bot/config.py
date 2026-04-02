@@ -51,7 +51,7 @@ MESSAGE_TEMPLATE = os.getenv(
 # Dynamic prompt template for LLM message generation
 TELEGRAM_MESSAGE_PROMPT = os.getenv(
     'TELEGRAM_MESSAGE_PROMPT',
-    default="Use the provided job application profile and job description to write a message on telegram to the recruiter applying for this job. Keep it under 150 words. Do not use markdown formatting like bolding or italics. Be enthusiastic and professional. Start with a greeting and end with a sign-off using the candidate's name (Sultangazy)."
+    default="Use the provided job application profile and job description to write a message on telegram to the recruiter applying for this job. Keep it under 150 words. Do not use markdown formatting like bolding or italics. Be enthusiastic and professional. Start with a greeting and end with a sign-off using the candidate's name (Sultangazy). IMPORTANT: Write the message in the SAME language as the job description provided (e.g., if the job description is in Russian, write the message in Russian)."
 )
 
 # Dynamic prompt template for LLM CV generation
@@ -63,7 +63,7 @@ CV_GENERATION_PROMPT = os.getenv(
 # Dynamic prompt template for LLM Cover Letter generation
 COVER_LETTER_PROMPT = os.getenv(
     'COVER_LETTER_PROMPT',
-    default="Write a compelling cover letter for the following job position. Use my professional profile to tailor the letter to the specific requirements of the role. The letter should be professional, highlight my fit for the company, and express my enthusiasm for the opportunity. Keep it to one page."
+    default="Write a compelling cover letter for the following job position. Use my professional profile to tailor the letter to the specific requirements of the role. The letter should be professional, highlight my fit for the company, and express my enthusiasm for the opportunity. Keep it to one page. IMPORTANT: Write the cover letter in the SAME language as the job description provided (e.g., if the job description is in Russian, write the cover letter in Russian)."
 )
 
 # Database path

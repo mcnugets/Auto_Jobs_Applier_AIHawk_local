@@ -1,4 +1,5 @@
 from loguru import logger
+from pathlib import Path
 
 
 class AIHawkBotState:
@@ -14,6 +15,7 @@ class AIHawkBotState:
         self.gpt_answerer_set = False
         self.parameters_set = False
         self.logged_in = False
+
 
     def validate_state(self, required_keys):
         logger.debug(f"Validating AIHawkBotState with required keys: {required_keys}")
@@ -35,6 +37,7 @@ class AIHawkBotFacade:
         self.email = None
         self.password = None
         self.parameters = None
+        self.config_file = None
 
     def set_job_application_profile_and_resume(self, job_application_profile, resume):
         logger.debug("Setting job application profile and resume")
@@ -56,11 +59,12 @@ class AIHawkBotFacade:
         self.state.gpt_answerer_set = True
         logger.debug("GPT answerer and resume generator set successfully")
 
-    def set_parameters(self, parameters):
+    def set_parameters(self, parameters, config_file: Path):
         logger.debug("Setting parameters")
         self._validate_non_empty(parameters, "Parameters")
         self.parameters = parameters
-        self.apply_component.set_parameters(parameters)
+        self.config_file = config_file
+        self.apply_component.set_parameters(parameters, config_file)
         self.state.credentials_set = True
         self.state.parameters_set = True
         logger.debug("Parameters set successfully")
@@ -70,6 +74,7 @@ class AIHawkBotFacade:
         self.state.validate_state(['credentials_set'])
         self.login_component.start()
         self.state.logged_in = True
+
         logger.debug("Login process completed successfully")
 
     def start_apply(self):

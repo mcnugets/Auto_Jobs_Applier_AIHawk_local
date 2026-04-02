@@ -106,14 +106,18 @@ class GeminiModel(AIModel):
             return self.model.invoke(prompt)
         except Exception as e:
             error_msg = str(e)
-            if "429" in error_msg or "ResourceExhausted" in error_msg:
-                if len(self.model_list) > 1:
+            # Switch model on quota limit (429) OR model not found (404)
+            if "429" in error_msg or "ResourceExhausted" in error_msg or "404" in error_msg or "not found" in error_msg.lower():
+                if len(self.model_list) > 1 and self.current_model_index < len(self.model_list) - 1:
                     old_model = self.model_list[self.current_model_index]
                     self.current_model_index = (self.current_model_index + 1) % len(self.model_list)
                     new_model = self.model_list[self.current_model_index]
-                    logger.warning(f"Quota reached for Gemini ({old_model}). Switching to next model: {new_model}")
+                    logger.warning(f"Gemini error with {old_model} (Error: {error_msg[:50]}...). Switching to next model: {new_model}")
                     self._init_model()
                     return self.invoke(prompt) # Recursive retry with next model
+                else:
+                    logger.critical(f"All Gemini models exhausted or quota exceeded for all configured models. Original error: {error_msg}")
+                    raise RuntimeError(f"Gemini API quota exceeded for all models or models not found. Please check your billing/usage.")
             raise e
 
 class HuggingFaceModel(AIModel):
@@ -134,8 +138,8 @@ class AIAdapter:
         self.model = self._create_model(config, api_key)
 
     def _create_model(self, config: dict, api_key: str) -> AIModel:
-        llm_model_type = config['llm_model_type']
-        llm_model = config['llm_model']
+        llm_model_type = config.get('llm_model_type', 'openai')
+        llm_model = config.get('llm_model', 'gpt-4o-mini')
 
         llm_api_url = config.get('llm_api_url', "")
 
@@ -147,7 +151,7 @@ class AIAdapter:
             return ClaudeModel(api_key, llm_model)
         elif llm_model_type == "ollama":
             return OllamaModel(llm_model, llm_api_url)
-        elif llm_model_type == "gemini":
+        elif llm_model_type in ["gemini", "google"]:
             return GeminiModel(api_key, llm_model)
         elif llm_model_type == "huggingface":
             return HuggingFaceModel(api_key, llm_model)        
@@ -729,13 +733,13 @@ You are an expert career coach and recruiter. Analyze the provided resume and jo
 # Output Requirements (JSON):
 Generate a JSON object with the following keys:
 1. "telegram_message": A very concise, professional message (50-70 words).
-   - IMPORTANT: Use the SAME language as the 'Job Description' provided.
+   - IMPORTANT: Use the SAME language as the 'Job Description' provided (e.g., if the job description is in Russian, the message MUST be in Russian).
    - Use 2-3 short, distinct paragraphs (use \n for line breaks). NO walls of text.
    - Strictly NO markdown (no **, no _, no `).
-   - End with a professional sign-off (e.g., "Best regards, Sultangazy Yergaliyev" in the appropriate language).
+   - End with a professional sign-off (e.g., "Best regards, Sultangazy Yergaliyev" or "С уважением, Султангазы Ергалиев").
 2. "cover_letter": A concise 3-paragraph tailored cover letter.
-   - IMPORTANT: Use the SAME language as the 'Job Description' provided.
-   - Must end with a professional sign-off (e.g., "Sincerely, Sultangazy Yergaliyev" in the appropriate language).
+   - IMPORTANT: Use the SAME language as the 'Job Description' provided (e.g., if the job description is in Russian, the cover letter MUST be in Russian).
+   - Must end with a professional sign-off (e.g., "Sincerely, Sultangazy Yergaliyev" or "С уважением, Султангазы Ергалиев").
 3. "resume_sections": An object containing tailored HTML snippets for each section.
    - IMPORTANT: MUST BE IN ENGLISH REGARDLESS OF THE JOB DESCRIPTION LANGUAGE.
    - Keep the HTML structure clean (use <h3>, <ul>, <li>, <p>). Each snippet should be 1-2 paragraphs or a bullet list.
