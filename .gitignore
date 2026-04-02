@@ -168,3 +168,5 @@ data_folder/secrets.yaml
 .agent/
 test_linkedin_easy_apply.py
 send_live_test.py
+data_folder/output/*
+

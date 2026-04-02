@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from selenium.common.exceptions import WebDriverException
 from loguru import logger
@@ -10,23 +9,14 @@ from src.llm.llm_manager import GPTAnswerer
 from src.aihawk_authenticator import AIHawkAuthenticator
 from src.aihawk_job_manager import AIHawkJobManager
 from src.aihawk_bot_facade import AIHawkBotFacade
-import main  # To use init_browser, or import init_browser from main later
-
-def init_browser(headless=False):
-    from selenium import webdriver
-    from selenium.webdriver.chrome.service import Service as ChromeService
-    from webdriver_manager.chrome import ChromeDriverManager
-    from src.utils import chrome_browser_options
-    
-    options = chrome_browser_options(headless=headless)
-    service = ChromeService(ChromeDriverManager().install())
-    return webdriver.Chrome(service=service, options=options)
+from main import init_browser
 
 class LinkedInAdapter(BaseJobAdapter):
-    def __init__(self, profile: JobApplicationProfile, parameters: dict, llm_api_key: str):
+    def __init__(self, profile: JobApplicationProfile, parameters: dict, llm_api_key: str, config_file: Path):
         super().__init__(profile, parameters, llm_api_key)
         self.resume_object = None
         self.bot = None
+        self.config_file = config_file
 
     def login(self) -> bool:
         # Initialized and handled by the old bot start_login()
@@ -73,7 +63,7 @@ class LinkedInAdapter(BaseJobAdapter):
             self.bot = AIHawkBotFacade(login_component, apply_component)
             self.bot.set_job_application_profile_and_resume(self.profile, self.resume_object)
             self.bot.set_gpt_answerer_and_resume_generator(gpt_answerer_component, resume_generator_manager)
-            self.bot.set_parameters(self.parameters)
+            self.bot.set_parameters(self.parameters, self.config_file)
             
             self.bot.start_login()
             

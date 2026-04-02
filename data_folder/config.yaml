@@ -1,63 +1,52 @@
-remote: false
-
+remote: true
 experienceLevel:
-  internship: true
-  entry: true
-  associate: false
-  mid-senior level: false
-  director: false
-  executive: false
-
+    internship: false
+    entry: true
+    associate: true
+    mid-senior level: true
+    director: false
+    executive: false
 jobTypes:
-  full-time: true
-  contract: true
-  part-time: true
-  temporary: true
-  internship: true
-  other: false
-  volunteer: true
-
+    full-time: true
+    contract: true
+    part-time: false
+    temporary: false
+    internship: false
+    other: false
+    volunteer: false
 date:
-  all time: true
-  month: true
-  week: false
-  24 hours: true
-
+    all time: false
+    month: false
+    week: true
+    24 hours: false
 positions:
-  - Software engineer
-  - Junior Software Engineer
-  - Graduate Software Engineer
-  - Data Scientist
-  - Data Engineer
-  - DevOps Engineer
-  - Python Developer
-  - Backend Egnineer
-
+- Python Developer
+- Software Engineer
+- Backend Engineer
+- Automation Specialist
+- Quantitative Developer
 locations:
-  - London
-
-apply_once_at_company: true
-
+- London
+- United Kingdom
+- Remote
+- European Economic Area
+location_blacklist: []
 distance: 100
-
 company_blacklist:
-  - wayfair
-  - Crossover
-
+- Crossover
+- Wayfair
 title_blacklist:
-  - word1
-  - word2
-
-location_blacklist:
-  - Brazil
-
-job_applicants_threshold:
-  min_applicants: 0
-  max_applicants: 1000
-
+- Junior
+- Intern
 llm_model_type: gemini
-llm_model: 'gemini-2.0-flash, gemini-flash-latest, gemini-2.5-flash'
-# llm_api_url: 'http://127.0.0.1:11434/'
-resume_style: 'Modern Blue'
-smart_master_prompt: true
+llm_model: gemini-2.0-flash, gemini-flash-latest, gemini-pro-latest, gemini-2.0-flash-001
 headless: false
+apply_once_at_company: true
+job_applicants_threshold:
+    min_applicants: 0
+    max_applicants: 100
+learned_easy_apply_xpath: //a[contains(., 'Apply')]
+learned_job_description_xpath: null
+learned_scrollable_element_xpath: //main
+learned_job_list_container_xpath: null
+learned_primary_button_xpath: null

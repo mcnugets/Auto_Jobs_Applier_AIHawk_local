@@ -59,6 +59,30 @@ class TelegramAdapter(BaseJobAdapter):
             else:
                 logger.info("Running Telegram Applier mode")
                 
+                print("\n" + "="*30)
+                print(" TELEGRAM COMMAND MENU")
+                print("="*30)
+                print("1. Scan & Apply (Full flow)")
+                print("2. Scan Only    (Find jobs, don't apply yet)")
+                print("3. Apply Only   (Use jobs already in database)")
+                print("4. Exit")
+                print("="*30)
+                
+                choice = input("Select an option (1-4): ").strip()
+                
+                if choice == '4' or not choice:
+                    return
+
+                limit = None
+                if choice in ['1', '3']:
+                    limit_input = input("Enter the number of jobs to apply to (or 'all' for all): ").strip().lower()
+                    if limit_input != 'all':
+                        try:
+                            limit = int(limit_input)
+                        except ValueError:
+                            logger.warning(f"Invalid limit '{limit_input}', applying to all.")
+                            limit = None
+
                 # Verify components are available
                 if not all([GPTAnswerer, Resume, StyleManager, FacadeManager, ResumeGenerator]):
                     logger.error("Missing AIHawk components. Cannot run Telegram Applier.")
@@ -68,7 +92,6 @@ class TelegramAdapter(BaseJobAdapter):
                 gpt_manager = GPTAnswerer(self.parameters, self.llm_api_key)
                 
                 # Load profile into Resume generator
-                import os
                 resume_object = None
                 resume_generator = None
                 facade_manager = None
@@ -96,26 +119,29 @@ class TelegramAdapter(BaseJobAdapter):
                     logger.warning(f"Failed to initialize dynamic Resume generator (using static fallback): {e}")
                     resume_generator = None
                     facade_manager = None
-                
-                # Can run monitor and then applier for a full pass
-                logger.info("="*50)
-                logger.info("PHASE 1: SCANNING TELEGRAM CHANNELS")
-                logger.info("="*50)
-                asyncio.run(run_monitor(self.db, scan_recent=True, audit_titles=False))
-                
-                logger.info("="*50)
-                logger.info("PHASE 2: APPLYING TO DISCOVERED JOBS")
-                logger.info("="*50)
-                asyncio.run(
-                    run_applier(
-                        self.db, 
-                        limit=None, 
-                        llm_manager=gpt_manager, 
-                        profile=self.profile,
-                        facade_manager=facade_manager,
-                        resume_object=resume_object
+
+                # Execution based on choice
+                if choice in ['1', '2']:
+                    logger.info("="*50)
+                    logger.info("PHASE 1: SCANNING TELEGRAM CHANNELS")
+                    logger.info("="*50)
+                    asyncio.run(run_monitor(self.db, scan_recent=True, audit_titles=False))
+
+                if choice in ['1', '3']:
+                    logger.info("="*50)
+                    logger.info("PHASE 2: APPLYING TO DISCOVERED JOBS")
+                    logger.info("="*50)
+                    asyncio.run(
+                        run_applier(
+                            self.db, 
+                            limit=limit, 
+                            llm_manager=gpt_manager, 
+                            profile=self.profile,
+                            facade_manager=facade_manager,
+                            resume_object=resume_object
+                        )
                     )
-                )
+                
                 logger.info("="*50)
                 logger.info("TELEGRAM ADAPTER SESSION COMPLETED")
                 logger.info("="*50)

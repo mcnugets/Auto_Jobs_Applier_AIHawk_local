@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import re
 import sys
@@ -71,7 +72,7 @@ class ConfigValidator:
     def validate_yaml_file(yaml_path: Path) -> dict:
         try:
             with open(yaml_path, 'r') as stream:
-                return yaml.safe_load(stream)
+                return yaml.safe_load(stream) or {}
         except yaml.YAMLError as exc:
             raise ConfigError(f"Error reading file {yaml_path}: {exc}")
         except FileNotFoundError:
@@ -97,54 +98,114 @@ class ConfigValidator:
         }
 
         for key, expected_type in required_keys.items():
-            if key not in parameters:
-                if key in ['company_blacklist', 'title_blacklist', 'location_blacklist']:
+            if key not in parameters or parameters[key] is None:
+                if key == 'positions' or key == 'locations':
+                    raise ConfigError(f"Missing or empty required key '{key}' in config file {config_yaml_path}. You must provide at least one.")
+                if expected_type == list:
                     parameters[key] = []
+                elif expected_type == dict:
+                    parameters[key] = {}
+                elif key == 'remote':
+                    parameters[key] = False
+                elif key == 'headless':
+                    parameters[key] = False
+                elif key == 'distance':
+                    parameters[key] = 100
+                elif key == 'llm_model_type':
+                    parameters[key] = 'openai'
+                elif key == 'llm_model':
+                    parameters[key] = 'gpt-4o-mini'
+                elif key == 'easy_apply_xpath_cache':
+                    parameters[key] = None
                 else:
-                    raise ConfigError(f"Missing or invalid key '{key}' in config file {config_yaml_path}")
+                    parameters[key] = expected_type() # Default constructor for other types
             elif not isinstance(parameters[key], expected_type):
-                if key in ['company_blacklist', 'title_blacklist', 'location_blacklist'] and parameters[key] is None:
-                    parameters[key] = []
-                else:
-                    raise ConfigError(f"Invalid type for key '{key}' in config file {config_yaml_path}. Expected {expected_type}.")
-
-        # Validate experience levels, ensure they are boolean
-        experience_levels = ['internship', 'entry', 'associate', 'mid-senior level', 'director', 'executive']
-        for level in experience_levels:
-            if not isinstance(parameters['experienceLevel'].get(level), bool):
-                raise ConfigError(f"Experience level '{level}' must be a boolean in config file {config_yaml_path}")
-
-        # Validate job types, ensure they are boolean
-        job_types = ['full-time', 'contract', 'part-time', 'temporary', 'internship', 'other', 'volunteer']
-        for job_type in job_types:
-            if not isinstance(parameters['jobTypes'].get(job_type), bool):
-                raise ConfigError(f"Job type '{job_type}' must be a boolean in config file {config_yaml_path}")
-
-        # Validate date filters
-        date_filters = ['all time', 'month', 'week', '24 hours']
-        for date_filter in date_filters:
-            if not isinstance(parameters['date'].get(date_filter), bool):
-                raise ConfigError(f"Date filter '{date_filter}' must be a boolean in config file {config_yaml_path}")
+                raise ConfigError(f"Invalid type for key '{key}' in config file {config_yaml_path}. Expected {expected_type.__name__}.")
 
         # Validate positions and locations as lists of strings
-        if not all(isinstance(pos, str) for pos in parameters['positions']):
-            raise ConfigError(f"'positions' must be a list of strings in config file {config_yaml_path}")
-        if not all(isinstance(loc, str) for loc in parameters['locations']):
-            raise ConfigError(f"'locations' must be a list of strings in config file {config_yaml_path}")
+        if not parameters['positions'] or not all(isinstance(pos, str) for pos in parameters['positions']):
+            raise ConfigError(f"'positions' must be a non-empty list of strings in config file {config_yaml_path}")
+        if not parameters['locations'] or not all(isinstance(loc, str) for loc in parameters['locations']):
+            raise ConfigError(f"'locations' must be a non-empty list of strings in config file {config_yaml_path}")
 
         # Validate distance
         approved_distances = {0, 5, 10, 25, 50, 100}
         if parameters['distance'] not in approved_distances:
-            raise ConfigError(f"Invalid distance value in config file {config_yaml_path}. Must be one of: {approved_distances}")
+            logger.warning(f"Invalid distance value {parameters['distance']}. Defaulting to 100.")
+            parameters['distance'] = 100
 
-        # Ensure blacklists are lists
-        for blacklist in ['company_blacklist', 'title_blacklist','location_blacklist']:
-            if not isinstance(parameters.get(blacklist), list):
-                raise ConfigError(f"'{blacklist}' must be a list in config file {config_yaml_path}")
-            if parameters[blacklist] is None:
-                parameters[blacklist] = []
+        # Ensure apply_once_at_company exists
+        if 'apply_once_at_company' not in parameters:
+            parameters['apply_once_at_company'] = False
+        elif not isinstance(parameters['apply_once_at_company'], bool):
+            parameters['apply_once_at_company'] = False
+        
+        # Add learned_easy_apply_xpath if it doesn't exist
+        if 'learned_easy_apply_xpath' not in parameters or parameters['learned_easy_apply_xpath'] is None:
+            parameters['learned_easy_apply_xpath'] = None
+        elif not isinstance(parameters['learned_easy_apply_xpath'], str):
+            raise ConfigError(f"Invalid type for key 'learned_easy_apply_xpath' in config file {config_yaml_path}. Expected str or None.")
+
+        # Add learned_job_description_xpath if it doesn't exist
+        if 'learned_job_description_xpath' not in parameters or parameters['learned_job_description_xpath'] is None:
+            parameters['learned_job_description_xpath'] = None
+        elif not isinstance(parameters['learned_job_description_xpath'], str):
+            raise ConfigError(f"Invalid type for key 'learned_job_description_xpath' in config file {config_yaml_path}. Expected str or None.")
+
+        # Add learned_scrollable_element_xpath if it doesn't exist
+        if 'learned_scrollable_element_xpath' not in parameters or parameters['learned_scrollable_element_xpath'] is None:
+            parameters['learned_scrollable_element_xpath'] = None
+        elif not isinstance(parameters['learned_scrollable_element_xpath'], str):
+            raise ConfigError(f"Invalid type for key 'learned_scrollable_element_xpath' in config file {config_yaml_path}. Expected str or None.")
+
+        # Add learned_job_list_container_xpath if it doesn't exist
+        if 'learned_job_list_container_xpath' not in parameters or parameters['learned_job_list_container_xpath'] is None:
+            parameters['learned_job_list_container_xpath'] = None
+        elif not isinstance(parameters['learned_job_list_container_xpath'], str):
+            raise ConfigError(f"Invalid type for key 'learned_job_list_container_xpath' in config file {config_yaml_path}. Expected str or None.")
+
+        # Add learned_primary_button_xpath if it doesn't exist
+        if 'learned_primary_button_xpath' not in parameters or parameters['learned_primary_button_xpath'] is None:
+            parameters['learned_primary_button_xpath'] = None
+        elif not isinstance(parameters['learned_primary_button_xpath'], str):
+            raise ConfigError(f"Invalid type for key 'learned_primary_button_xpath' in config file {config_yaml_path}. Expected str or None.")
 
         return parameters
+
+
+    @staticmethod
+    def save_config(config_data: dict, config_yaml_path: Path) -> None:
+        try:
+            # Safety check: ensure we are not saving an empty or corrupted config
+            if not config_data or 'positions' not in config_data or not config_data['positions']:
+                logger.error("Attempted to save an empty or invalid configuration. Aborting save to protect config file.")
+                return
+
+            # Define keys that are safe and intended to be persisted in config.yaml
+            persistable_keys = [
+                'remote', 'experienceLevel', 'jobTypes', 'date', 'positions', 'locations',
+                'location_blacklist', 'distance', 'company_blacklist', 'title_blacklist',
+                'llm_model_type', 'llm_model', 'headless', 'apply_once_at_company',
+                'job_applicants_threshold', 'learned_easy_apply_xpath', 'learned_job_description_xpath',
+                'learned_scrollable_element_xpath', 'learned_job_list_container_xpath',
+                'learned_primary_button_xpath'
+            ]
+            serializable_config = {}
+            for key in persistable_keys:
+                if key in config_data:
+                    val = config_data[key]
+                    # Convert Path objects to strings for YAML serialization
+                    if isinstance(val, Path):
+                        serializable_config[key] = str(val)
+                    else:
+                        serializable_config[key] = val
+
+            with open(config_yaml_path, 'w') as stream:
+                yaml.safe_dump(serializable_config, stream, indent=4, sort_keys=False)
+            logger.debug(f"Configuration successfully saved to {config_yaml_path}")
+        except Exception as e:
+            logger.error(f"Failed to save configuration to {config_yaml_path}: {e}")
+            # We don't raise here to avoid crashing the bot just because config saving failed
 
     @staticmethod
     def validate_secrets(secrets_yaml_path: Path) -> str:
@@ -197,7 +258,7 @@ def init_browser(headless: bool = False) -> webdriver.Chrome:
     except Exception as e:
         raise RuntimeError(f"Failed to initialize browser: {str(e)}")
 
-def create_and_run_bot(parameters: dict, llm_api_key: str, channel: str):
+def create_and_run_bot(parameters: dict, llm_api_key: str, channel: str, config_file: Path):
     from src.job_application_profile import JobApplicationProfile
     from src.adapters.linkedin_adapter import LinkedInAdapter
     from src.adapters.telegram_adapter import TelegramAdapter
@@ -212,7 +273,7 @@ def create_and_run_bot(parameters: dict, llm_api_key: str, channel: str):
         
         adapter = None
         if channel == 'linkedin':
-            adapter = LinkedInAdapter(profile, parameters, llm_api_key)
+            adapter = LinkedInAdapter(profile, parameters, llm_api_key, config_file)
         elif channel == 'telegram':
             adapter = TelegramAdapter(profile, parameters, llm_api_key)
         elif channel == 'career_website':
@@ -226,12 +287,33 @@ def create_and_run_bot(parameters: dict, llm_api_key: str, channel: str):
     except Exception as e:
         raise RuntimeError(f"Error initializing or running bot: {str(e)}")
 
+def prompt_for_channel():
+    """Prompts the user to select a channel and returns the choice."""
+    channels = {
+        '1': 'linkedin',
+        '2': 'career_website',
+        '3': 'telegram',
+        '4': 'all'
+    }
+    print("Please select the job application mode:")
+    print("1: LinkedIn Easy Apply")
+    print("2: Career Websites (from LinkedIn)")
+    print("3: Telegram")
+    print("4: All")
+
+    while True:
+        choice = input("Enter the number of your choice: ")
+        if choice in channels:
+            return channels[choice]
+        else:
+            print("Invalid choice. Please select a valid number.")
+
 @click.command()
-@click.option('--channel', type=click.Choice(['telegram', 'linkedin', 'career_website', 'all']), default='linkedin', help="Choose application channel")
 @click.option('--resume', type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path), help="Path to the resume PDF file")
 @click.option('--collect', is_flag=True, help="Only collects data job information into data.json file")
-def main(channel: str, collect: bool, resume: Path = None):
+def main(collect: bool, resume: Path = None):
     try:
+        channel = prompt_for_channel()
         data_folder = Path("data_folder")
         secrets_file, config_file, plain_text_resume_file, output_folder = FileManager.validate_data_folder(data_folder)
         
@@ -244,11 +326,25 @@ def main(channel: str, collect: bool, resume: Path = None):
         parameters['channel'] = channel
         
         if channel == 'all':
-            logger.warning("Running all channels sequentially...")
-            for ch in ['linkedin', 'telegram', 'career_website']:
-                create_and_run_bot(parameters, llm_api_key, ch)
+            import threading
+            logger.info("Starting all channels in parallel...")
+            threads = []
+            # Note: We run them in parallel. 
+            # Career Website is under construction, so it will exit quickly.
+            # LinkedIn and Telegram will run concurrently.
+            for ch in ['linkedin', 'career_website', 'telegram']:
+                t = threading.Thread(
+                    target=create_and_run_bot, 
+                    args=(parameters, llm_api_key, ch, config_file),
+                    name=f"Bot-{ch}"
+                )
+                t.start()
+                threads.append(t)
+            
+            for t in threads:
+                t.join()
         else:
-            create_and_run_bot(parameters, llm_api_key, channel)
+            create_and_run_bot(parameters, llm_api_key, channel, config_file)
             
     except ConfigError as ce:
         logger.error(f"Configuration error: {str(ce)}")
