@@ -20,16 +20,15 @@ class AIHawkAuthenticator:
         if self.is_logged_in():
             logger.info("User is already logged in. Skipping login process.")
             return
-        else:
-            logger.info("User is not logged in. Proceeding with login.")
-            self.handle_login()
+
+        logger.info("User is not logged in. Proceeding with login.")
+        self.handle_login()
+        logger.info("Login process completed. Continuing...")
 
     def handle_login(self):
         logger.info("Navigating to the AIHawk login page...")
         self.driver.get("https://www.linkedin.com/login")
-        if 'feed' in self.driver.current_url:
-            logger.debug("User is already logged in.")
-            return
+        
         try:
             self.enter_credentials()
         except NoSuchElementException as e:
@@ -69,45 +68,78 @@ class AIHawkAuthenticator:
 
     def handle_security_check(self):
         try:
-            logger.debug("Handling security check...")
-            WebDriverWait(self.driver, 10).until(
+            logger.debug("Checking for security checkpoint...")
+            # Short wait to see if redirected to challenge page
+            WebDriverWait(self.driver, 5).until(
                 EC.url_contains('https://www.linkedin.com/checkpoint/challengesV2/')
             )
             logger.warning("Security checkpoint detected. Please complete the challenge.")
+            # Long wait for user to solve challenge and reach feed
             WebDriverWait(self.driver, 300).until(
                 EC.url_contains('https://www.linkedin.com/feed/')
             )
-            logger.info("Security check completed")
+            logger.info("Security check completed successfully.")
         except TimeoutException:
-            logger.error("Security check not completed. Please try again later.")
+            # Check if we are already on the feed page
+            if 'feed' in self.driver.current_url:
+                logger.info("No security check needed or already completed.")
+            else:
+                logger.debug("No security checkpoint detected within 5 seconds.")
+        except Exception as e:
+            logger.error(f"Unexpected error during security check: {e}")
 
     def is_logged_in(self):
         try:
-            self.driver.get('https://www.linkedin.com/feed')
-            logger.debug("Checking if user is logged in...")
-            WebDriverWait(self.driver, 3).until(
-                EC.presence_of_element_located((By.CLASS_NAME, 'share-box-feed-entry__trigger'))
-            )
+            logger.debug("Checking if user is logged in (passive check)...")
+            current_url = self.driver.current_url
 
-            # Check for the presence of the "Start a post" button
-            buttons = self.driver.find_elements(By.CLASS_NAME, 'share-box-feed-entry__trigger')
-            logger.debug(f"Found {len(buttons)} 'Start a post' buttons")
+            # Prioritize checking for clear logged-out states or intermediate pages first
+            if "linkedin.com/login" in current_url:
+                logger.debug("Currently on LinkedIn login page. User is not logged in.")
+                return False
+            if "linkedin.com/checkpoint/challenge" in current_url or "linkedin.com/uas/oauth/authorize" in current_url:
+                logger.warning(f"Currently on a security/challenge page: {current_url}. User is not fully logged in.")
+                return False
+            
+            # Attempt to accept cookie/privacy consent if present, without failing the whole check
+            try:
+                # Look for common cookie consent pop-ups or banners
+                consent_button = WebDriverWait(self.driver, 1).until( # Shorter wait to not block
+                    EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Accept cookies') or contains(., 'Accept') or contains(., 'Agree')]"))
+                )
+                if consent_button.is_displayed():
+                    consent_button.click()
+                    logger.info("Clicked cookie consent button. Continuing login check.")
+                    time.sleep(1) # Small pause for page to react
+            except TimeoutException:
+                logger.debug("No cookie consent pop-up/banner found during passive check.")
+            except Exception as e:
+                logger.warning(f"Error handling cookie consent during passive check: {e}")
 
-            for i, button in enumerate(buttons):
-                logger.debug(f"Button {i + 1} text: {button.text.strip()}")
+            # Now, check for the most definitive logged-in element on the current page
+            # The global navigation bar (ID 'global-nav') is usually a very reliable indicator.
+            selectors = [
+                (By.ID, 'global-nav'), # Main global navigation bar
+                (By.XPATH, "//input[contains(@class, 'search-global-typeahead__input')]") # Global search input field
+            ]
+            
+            for selector_type, selector_value in selectors:
+                logger.debug(f"Attempting to detect login via selector: {selector_value}")
+                try:
+                    # Very short wait, if it's there, it's there. No need to wait long.
+                    element = WebDriverWait(self.driver, 1).until(
+                        EC.presence_of_element_located((selector_type, selector_value))
+                    )
+                    if element.is_displayed():
+                        logger.info(f"User is logged in (detected via {selector_value})")
+                        return True
+                except Exception as e:
+                    logger.debug(f"Login check failed for selector {selector_value}: {e}")
+                    continue
 
-            if any(button.text.strip().lower() == 'start a post' for button in buttons):
-                logger.info("Found 'Start a post' button indicating user is logged in.")
-                return True
-
-            profile_img_elements = self.driver.find_elements(By.XPATH, "//img[contains(@alt, 'Photo of')]")
-            if profile_img_elements:
-                logger.info("Profile image found. Assuming user is logged in.")
-                return True
-
-            logger.info("Did not find 'Start a post' button or profile image. User might not be logged in.")
+            logger.info("User might not be logged in. No common logged-in elements found on the current page after trying multiple selectors.")
             return False
 
-        except TimeoutException:
-            logger.error("Page elements took too long to load or were not found.")
+        except Exception as e:
+            logger.error(f"Error during passive login check: {e}")
             return False

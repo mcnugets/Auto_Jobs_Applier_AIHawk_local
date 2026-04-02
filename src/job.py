@@ -10,6 +10,7 @@ class Job:
     location: str
     link: str
     apply_method: str
+    applicants: int = 0
     description: str = ""
     summarize_job_description: str = ""
     pdf_path: str = ""

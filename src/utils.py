@@ -35,15 +35,29 @@ def ensure_chrome_profile():
 
 
 def is_scrollable(element):
-    scroll_height = element.get_attribute("scrollHeight")
-    client_height = element.get_attribute("clientHeight")
-    scrollable = int(scroll_height) > int(client_height)
-    logger.debug(f"Element scrollable check: scrollHeight={scroll_height}, clientHeight={client_height}, scrollable={scrollable}")
-    return scrollable
+    """
+    Checks if an element is scrollable. 
+    For body/html, we often want to try scrolling regardless of what Selenium reports.
+    """
+    try:
+        if element.tag_name in ["body", "html"]:
+            return True
+            
+        scroll_height = int(element.get_attribute("scrollHeight") or 0)
+        client_height = int(element.get_attribute("clientHeight") or 0)
+        offset_height = int(element.get_attribute("offsetHeight") or 0)
+        
+        # An element is scrollable if its content is larger than its visible area
+        scrollable = scroll_height > client_height or scroll_height > offset_height
+        logger.debug(f"Element <{element.tag_name}> scrollable check: scrollHeight={scroll_height}, clientHeight={client_height}, offsetHeight={offset_height}, scrollable={scrollable}")
+        return scrollable
+    except Exception as e:
+        logger.debug(f"Error checking scrollability: {e}")
+        return True # Default to True to attempt scrolling anyway
 
 
 def scroll_slow(driver, scrollable_element, start=0, end=3600, step=300, reverse=False):
-    logger.debug(f"Starting slow scroll: start={start}, end={end}, step={step}, reverse={reverse}")
+    logger.debug(f"Starting slow scroll on <{scrollable_element.tag_name}>: start={start}, end={end}, step={step}, reverse={reverse}")
 
     if reverse:
         start, end = end, start
@@ -53,60 +67,58 @@ def scroll_slow(driver, scrollable_element, start=0, end=3600, step=300, reverse
         logger.error("Step value cannot be zero.")
         raise ValueError("Step cannot be zero.")
 
-    max_scroll_height = int(scrollable_element.get_attribute("scrollHeight"))
-    current_scroll_position = int(float(scrollable_element.get_attribute("scrollTop")))
-    logger.debug(f"Max scroll height of the element: {max_scroll_height}")
-    logger.debug(f"Current scroll position: {current_scroll_position}")
+    try:
+        max_scroll_height = int(scrollable_element.get_attribute("scrollHeight") or 0)
+        current_scroll_position = int(float(scrollable_element.get_attribute("scrollTop") or 0))
+        logger.debug(f"Max scroll height of the element: {max_scroll_height}")
+        logger.debug(f"Current scroll position: {current_scroll_position}")
 
-    if reverse:
-        if current_scroll_position < start:
-            start = current_scroll_position
-        logger.debug(f"Adjusted start position for upward scroll: {start}")
-    else:
-        if end > max_scroll_height:
-            logger.warning(f"End value exceeds the scroll height. Adjusting end to {max_scroll_height}")
+        if not reverse and end > max_scroll_height and max_scroll_height > 0:
+            logger.debug(f"End value {end} exceeds the scroll height {max_scroll_height}. Adjusting end.")
             end = max_scroll_height
 
-    script_scroll_to = "arguments[0].scrollTop = arguments[1];"
-
-    try:
         if scrollable_element.is_displayed():
-            if not is_scrollable(scrollable_element):
-                logger.warning("The element is not scrollable.")
-                return
-
-            if (step > 0 and start >= end) or (step < 0 and start <= end):
-                logger.warning("No scrolling will occur due to incorrect start/end values.")
-                return
-
+            # We attempt scrolling regardless of is_scrollable() for body/html
+            # or if it seems scrollable.
+            
             position = start
             previous_position = None  # Tracking the previous position to avoid duplicate scrolls
+            
+            if scrollable_element.tag_name in ["body", "html"]:
+                script_scroll_to = "window.scrollTo(0, arguments[1]);"
+                get_scroll_pos = "return window.pageYOffset || document.documentElement.scrollTop;"
+            else:
+                script_scroll_to = "arguments[0].scrollTop = arguments[1];"
+                get_scroll_pos = "return arguments[0].scrollTop;"
+            
             while (step > 0 and position < end) or (step < 0 and position > end):
-                if position == previous_position:
-                    # Avoid re-scrolling to the same position
-                    logger.debug(f"Stopping scroll as position hasn't changed: {position}")
-                    break
-
                 try:
                     driver.execute_script(script_scroll_to, scrollable_element, position)
-                    logger.debug(f"Scrolled to position: {position}")
+                    time.sleep(random.uniform(0.3, 0.8))
+                    
+                    new_position = int(float(driver.execute_script(get_scroll_pos, scrollable_element) or 0))
+                    if previous_position is not None and abs(new_position - previous_position) < 5:
+                        # If position didn't change after an attempt to scroll, we might have hit the end
+                        logger.debug(f"Scroll position hasn't changed ({new_position}), possibly reached end of scrollable area.")
+                        break
+                    previous_position = new_position
                 except Exception as e:
                     logger.error(f"Error during scrolling: {e}")
+                    break
 
-                previous_position = position
                 position += step
+                # Slightly decrease the step to simulate natural scrolling, but keep it effective
+                step = max(50, abs(step) - 5) * (-1 if reverse else 1)
 
-                # Decrease the step but ensure it doesn't reverse direction
-                step = max(10, abs(step) - 10) * (-1 if reverse else 1)
-
-                time.sleep(random.uniform(0.6, 1.5))
-
-            # Ensure the final scroll position is correct
-            driver.execute_script(script_scroll_to, scrollable_element, end)
-            logger.debug(f"Scrolled to final position: {end}")
+            # Ensure the final scroll position is attempted
+            try:
+                driver.execute_script(script_scroll_to, scrollable_element, end)
+            except:
+                pass
+            logger.debug(f"Completed scroll attempt to: {end}")
             time.sleep(0.5)
         else:
-            logger.warning("The element is not visible.")
+            logger.warning("The element is not visible, skipping scroll.")
     except Exception as e:
         logger.error(f"Exception occurred during scrolling: {e}")
 
@@ -168,3 +180,22 @@ def printyellow(text):
     reset = "\033[0m"
     logger.debug("Printing text in yellow: %s", text)
     print(f"{yellow}{text}{reset}")
+
+
+def is_message_popup_open(driver) -> bool:
+    """Detect if a LinkedIn message thread is in focus"""
+    from selenium.webdriver.common.by import By
+    popups = driver.find_elements(
+        By.XPATH,
+        "//div[contains(@class, 'msg-overlay-conversation-bubble')]"
+    )
+    return len(popups) > 0
+
+
+def safe_click(driver, element):
+    """Only click if no message popup is open"""
+    if is_message_popup_open(driver):
+        logger.warning("Message popup detected — skipping click to avoid employer spam")
+        return False
+    element.click()
+    return True
