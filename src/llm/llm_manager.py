@@ -116,39 +116,54 @@ class GeminiModel(AIModel):
             }
         )
 
-    def invoke(self, prompt: str, attempts: int = 0) -> BaseMessage:
-        # Prevent infinite recursion if all keys fail
-        if attempts >= len(self.api_keys) * 2:
-            logger.critical("All Gemini API keys failed after multiple rotation attempts.")
-            raise RuntimeError("Gemini API quota exceeded for all keys.")
+    def invoke(self, prompt: str, combinations_tried: int = 0) -> BaseMessage:
+        # Prevent infinite recursion if all combinations fail
+        max_combinations = len(self.api_keys) * len(self.model_list)
+        if combinations_tried >= max_combinations:
+            logger.critical("All Gemini API key and model combinations failed.")
+            raise RuntimeError("Gemini API quota exceeded for all models across all provided keys.")
 
         try:
             return self.model.invoke(prompt)
         except Exception as e:
             error_msg = str(e)
             
-            # 1. Check for Quota/Auth errors to rotate API KEY
+            # 1. Check for Quota/Auth errors (429, ResourceExhausted, 401)
             if "429" in error_msg or "ResourceExhausted" in error_msg or "401" in error_msg:
-                if len(self.api_keys) > 1:
-                    old_key_index = self.current_key_index
-                    self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
-                    logger.warning(f"Gemini API Key #{old_key_index + 1} failed ({error_msg[:50]}...). Rotating to key #{self.current_key_index + 1}")
-                    self._init_model()
-                    # Small sleep to let the rate limit settle if needed
-                    time.sleep(1)
-                    return self.invoke(prompt, attempts + 1)
-            
-            # 2. Check for Model errors to rotate MODEL NAME
-            if "404" in error_msg or "not found" in error_msg.lower():
-                if len(self.model_list) > 1 and self.current_model_index < len(self.model_list) - 1:
+                # Try next MODEL in the list first for the current API KEY
+                if self.current_model_index < len(self.model_list) - 1:
                     old_model = self.model_list[self.current_model_index]
                     self.current_model_index += 1
                     new_model = self.model_list[self.current_model_index]
-                    logger.warning(f"Gemini model {old_model} not found. Switching to next model: {new_model}")
-                    self._init_model()
-                    return self.invoke(prompt, attempts) # Note: attempts only count for key rotation
+                    logger.warning(f"Model {old_model} quota reached on Key #{self.current_key_index + 1}. Trying next model: {new_model}")
+                else:
+                    # All models exhausted for this key, rotate to next API KEY and reset model index
+                    if len(self.api_keys) > 1:
+                        old_key_index = self.current_key_index
+                        self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
+                        self.current_model_index = 0
+                        logger.warning(f"All models exhausted for Key #{old_key_index + 1}. Rotating to API Key #{self.current_key_index + 1} and resetting model sequence.")
+                    else:
+                        # Only one key provided and all models for it are exhausted
+                        logger.critical(f"All configured models exhausted for the only available API Key. Error: {error_msg}")
+                        raise e
+                
+                self._init_model()
+                # Small sleep to let the gateway settle
+                time.sleep(1)
+                return self.invoke(prompt, combinations_tried + 1)
             
-            # If we reached here, either rotation didn't help or it's a different error
+            # 2. Check for Model not found errors (404)
+            if "404" in error_msg or "not found" in error_msg.lower():
+                if self.current_model_index < len(self.model_list) - 1:
+                    old_model = self.model_list[self.current_model_index]
+                    self.current_model_index += 1
+                    new_model = self.model_list[self.current_model_index]
+                    logger.warning(f"Gemini model {old_model} not found. Skipping to next model: {new_model}")
+                    self._init_model()
+                    return self.invoke(prompt, combinations_tried + 1)
+            
+            # If we reached here, it's a different kind of error
             logger.error(f"Gemini execution error: {error_msg}")
             raise e
 
