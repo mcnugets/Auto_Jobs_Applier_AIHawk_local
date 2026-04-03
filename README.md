@@ -1,132 +1,93 @@
 <a name="top"></a>
 <div align="center">
-<img src="./assets/AIHawk.png">
 
-# Auto_Jobs_Applier_AIHawk: Agentic Extension Suite
+# JobAnal: The Job Applying Engine
 
-  ![CI](https://github.com/feder-cr/Auto_Jobs_Applier_AIHawk/actions/workflows/ci.yml/badge.svg)
+**🤖🚀 An Autonomous, Multi-Agent Ecosystem for High-Performance Career Automation.**
 
-**🤖🔍 The Intelligent Engine for Autonomous Job Searching.**
-*Now extended with multi-agent orchestration support for **OpenClaw** and **ZeroClaw**.*
+*Stop searching. Start applying. Operate in the background.*
 
 </div>
 
-## 🌟 Enhanced Agentic Edition
+## 🌐 Overview
 
-This version of AIHawk has been significantly upgraded to serve as a high-performance **automation engine** for autonomous AI agents. While the base tool handles the "brawn" of browser automation, these extensions provide the "brain" for a fully hands-off career search.
+**JobAnal** is a next-generation job application engine designed for the era of autonomous AI agents. Unlike standard automation tools, JobAnal is built to be the "execution layer" for intelligent brains like **OpenClaw** and **ZeroClaw**.
 
-### 🚀 Key Agentic Enhancements
-
-1.  **ZeroClaw & OpenClaw Integration**:
-    *   **Stateless Idle Brain**: Supports running as a satellite tool for **ZeroClaw** (Rust-based agent).
-    *   **5MB Deep Sleep**: Designed to wake up on trigger, process jobs, and return to an idle state with near-zero resource consumption.
-    *   **Webhook Control**: Includes a dedicated `webhook_server.py` to allow remote execution via agentic skills.
-
-2.  **Advanced LLM Orchestration**:
-    *   **Model-First Rotation**: Intelligently cycles through multiple Gemini/OpenAI models (Flash -> Pro) before rotating API keys.
-    *   **Failover API Keys**: Support for `llm_api_key_2`, `llm_api_key_3`, etc., ensuring 100% uptime during high-volume runs.
-    *   **Immediate 429 Handling**: Zero-latency switching when hitting provider rate limits.
-
-3.  **Autonomous Intelligence**:
-    *   **Adaptive Language Detection**: Automatically detects job description language (e.g., Russian, German) and responds in kind.
-    *   **Recursive Navigation Engine**: A new truly recursive iframe and Shadow DOM traversal system to defeat complex "Easy Apply" layouts.
-    *   **Strict Anti-Hallucination**: Mandatory grounding rules to prevent the AI from claiming skills not present in your profile.
+It leverages a high-concurrency Python core for browser automation and a Rust-based orchestration layer for long-term memory and system-level efficiency.
 
 ---
 
-## Table of Contents
+## 🌟 Key Features (The JobAnal Advantage)
 
-1. [Agentic Architecture](#agentic-architecture)
-2. [Features](#features)
-3. [Installation](#installation)
-4. [Configuration](#configuration)
-5. [Usage](#usage)
-6. [Documentation](#documentation)
-7. [Contributors](#contributors)
-8. [License](#license)
+### 1. **Agentic Orchestration (The "Idle Brain")**
+JobAnal is specifically optimized to run as a satellite for **ZeroClaw**. 
+*   **Deep Sleep State**: Consumes only ~5MB of RAM while waiting for triggers.
+*   **Persistent Binary Memory**: Uses low-level binary vector storage to maintain your career context and application history without bloat.
+*   **Webhook Interface**: Full remote-control capability via a secure local API.
 
----
+### 2. **Multi-Channel Parallelism**
+Why apply one by one? JobAnal's engine runs multiple channels simultaneously:
+*   **Concurrent Execution**: LinkedIn, Telegram, and Career Portals run in parallel threads.
+*   **Interactive Control**: A CLI-based command menu allows you to manage "Scouts" (scanning) and "Snipers" (applying) independently.
 
-## 🧠 Agentic Architecture
+### 3. **Smart Failover & LLM Resilience**
+Built for high-volume users who can't afford to stop:
+*   **Model-First Rotation**: Automatically cycles through all available model tiers (e.g., Gemini Flash -> Pro) to maximize free quotas.
+*   **Rotational API Keys**: Seamlessly swaps between multiple backup API keys the millisecond a rate limit (429) is detected.
 
-This suite is designed to be the execution layer for a multi-agent system:
-
-*   **The Orchestrator (OpenClaw/ZeroClaw)**: Handles high-level strategy, goal setting, and long-term memory via binary vector storage.
-*   **The Engine (AIHawk Extension)**: Handles the tactical execution (Selenium, Telethon, PDF generation).
-*   **The Bridge (Webhook)**: Connects the two via a secure local API.
-
-For detailed information on the low-level memory layers used by the companion agent, see [zeroclaw_architecture.md](zeroclaw_architecture.md).
-
----
-
-## Features
-
-1.  **Parallel Execution Mode**: Run LinkedIn, Telegram, and Career Website bots simultaneously using Python threading.
-2.  **Interactive Telegram Command Menu**: Manual control over scanning vs. applying to manage your digital footprint.
-3.  **Dynamic Resume Tailoring**: On-the-fly PDF generation specifically matched to the recruiter's language and requirements.
-4.  **Intelligent Filtering**: Automatic duplicate detection and anti-spam protection across different channels.
+### 4. **Adaptive Context Engineering**
+*   **Language Mirroring**: Automatically detects the language of the job description (Russian, German, English, etc.) and generates tailored responses in the recruiter's native tongue.
+*   **Recursive Navigation**: A custom navigation engine that uses recursive iframe and Shadow DOM traversal to defeat the most complex "Easy Apply" forms.
+*   **Anti-Hallucination Grounding**: Strict technical rules ensure the AI never claims a skill that isn't in your core profile.
 
 ---
 
-## Installation
+## 🛠️ Architecture
 
-1. **Clone the extension suite:**
-   ```bash
-   git clone https://github.com/mcnugets/Auto_Jobs_Applier_AIHawk_local.git
-   cd Auto_Jobs_Applier_AIHawk
-   ```
-
-2. **Setup Environment:**
-   ```bash
-   chmod +x aihawk
-   ./aihawk  # Automatically handles venv and dependencies
-   ```
+JobAnal follows a "Brain & Brawn" architecture:
+*   **Brain**: ZeroClaw/OpenClaw (Strategic planning & long-term memory).
+*   **Brawn**: JobAnal Core (Tactical Selenium automation & PDF generation).
+*   **Bridge**: JobAnal Webhook (High-speed local communication).
 
 ---
 
-## Configuration
+## 🚀 Getting Started
 
-### 1. secrets.yaml (Rotational Keys)
-```yaml
-llm_api_key: "PRIMARY_KEY"
-llm_api_key_2: "BACKUP_KEY"
-telegram_api_id: "..."
-```
-
-### 2. config.yaml (Model List)
-```yaml
-llm_model: "gemini-2.0-flash, gemini-1.5-flash, gemini-1.5-pro"
-```
-
----
-
-## Usage
-
-### Run as a Standalone Suite
+### 1. Installation
 ```bash
+git clone https://github.com/mcnugets/JobAnal.git
+cd JobAnal
+chmod +x aihawk
+./aihawk  # Initializes the unified environment
+```
+
+### 2. Configure Your Profile
+Update `data_folder/plain_text_resume.yaml` with your details. This serves as the "Source of Truth" for the engine.
+
+### 3. Execution
+```bash
+# Start the full engine
 python main.py
-```
-Select **Option 4 (All)** to trigger the high-concurrency parallel application mode.
 
-### Run as an Agent Satellite (Webhook Mode)
-```bash
+# Start the Webhook for Agent control
 python webhook_server.py
 ```
-Your agent (ZeroClaw/OpenClaw) can now trigger applications via POST requests to `:5050/apply`.
 
 ---
 
-## Contributors
+## 👨‍💻 Engineering & Contributions
 
-- [feder-cr](https://github.com/feder-cr) - Creator of the original AIHawk engine.
-- [mcnugets](https://github.com/mcnugets) - Lead developer of the Agentic Extension Suite.
+JobAnal is an advanced distribution of the AIHawk automation core, re-engineered for agentic autonomy and multi-threaded performance.
 
-## License
+*   **Lead Architect**: [mcnugets](https://github.com/mcnugets)
+*   **Core Logic**: Based on the AIHawk Engine.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+---
 
-## Disclaimer
+## 📄 License & Disclaimer
 
-This tool is for educational purposes. Use automated application tools responsibly and at your own risk.
+JobAnal is licensed under the MIT License. 
+
+**Disclaimer**: This is a powerful automation engine. Use it responsibly and in accordance with the terms of service of the platforms you interact with.
 
 [Back to top 🚀](#top)
