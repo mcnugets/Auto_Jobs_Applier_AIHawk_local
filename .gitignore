@@ -101,6 +101,7 @@ live_button_test.py
 test_recursive_button.py
 test_single_job.py
 test_telegram_ullmeister.py
+tests/test_clownmaxxer_artifacts.py
 easy_apply_not_found.png
 feed_not_logged_in.png
 *.png
