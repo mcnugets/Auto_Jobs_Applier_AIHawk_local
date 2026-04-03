@@ -5,7 +5,7 @@
 
 **🤖🚀 An Autonomous, Multi-Agent Ecosystem for High-Performance Career Automation.**
 
-*Stop searching. Start applying. Operate in the background.*
+
 
 </div>
 
